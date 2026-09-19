@@ -28,7 +28,21 @@ from router.cost import get_cost_tracker
 from router.analyzer import RequestType
 from router.multi_account import AccountManager
 
+# Session Manager imports (Phase 4 integration)
+from router.task_splitter import TaskSizeDetector, HybridTaskSplitter, TaskAnalysis
+from router.session_pool import SessionPool, PoolConfig
+from router.parallel_executor import ParallelExecutor
+from router.context_manager import ContextManager
+from router.result_aggregator import ResultAggregator, HybridResultAggregator
+from router.adaptive_manager import AdaptiveManager, PerformanceTracker
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Session Manager configuration constants
+# ---------------------------------------------------------------------------
+_SESSION_MGR_ENABLED = True   # Can be made configurable later via env/config
+_TOKEN_THRESHOLD = 4000        # Token threshold above which tasks are split
 
 # Re-export for backward compatibility
 __all__ = [
@@ -57,6 +71,27 @@ async def lifespan(app: FastAPI):
     acct_mgr = AccountManager.get_instance()
     acct_mgr.start_recovery()
     app.state.account_manager = acct_mgr
+
+    # Initialize Session Manager components (Phase 4)
+    pool_config = PoolConfig()
+    session_pool = SessionPool(config=pool_config)
+    perf_tracker = PerformanceTracker()
+    adaptive_mgr = AdaptiveManager(pool_config=pool_config, tracker=perf_tracker)
+    
+    # Task detection and splitting
+    task_detector = TaskSizeDetector(token_threshold=_TOKEN_THRESHOLD)
+    splitter = HybridTaskSplitter()
+    executor = ParallelExecutor(session_pool=session_pool)
+    
+    # Store in app state
+    app.state.session_pool = session_pool
+    app.state.perf_tracker = perf_tracker
+    app.state.adaptive_mgr = adaptive_mgr
+    app.state.task_detector = task_detector
+    app.state.splitter = splitter
+    app.state.executor = executor
+    
+    logger.info("Session Manager initialized: threshold=%d tokens", _TOKEN_THRESHOLD)
 
     yield
 
@@ -146,6 +181,76 @@ async def chat_completions(request: ChatCompletionRequest):
     request_dict = request.model_dump()
     request_dict["model"] = model  # Use the mapped model name
     
+    # Session Manager: check if task needs splitting (non-streaming only)
+    if _SESSION_MGR_ENABLED and not request.stream:
+        try:
+            detector = app.state.task_detector
+            analysis = detector.analyze(request_dict)
+            
+            if analysis.needs_splitting:
+                logger.info(
+                    "Session Manager: task needs splitting (tokens=%d, complexity=%s, suggested=%d)",
+                    analysis.estimated_tokens, analysis.complexity, analysis.suggested_split_count
+                )
+                
+                # Use session manager flow
+                splitter = app.state.splitter
+                sub_tasks = await splitter.split(request_dict, analysis)
+                
+                if len(sub_tasks) > 1:
+                    logger.info("Session Manager: split into %d sub-tasks", len(sub_tasks))
+                    
+                    # Execute via session manager
+                    executor = app.state.executor
+                    ctx_mgr = ContextManager()
+                    
+                    # Prepare sub-tasks with context
+                    for task in sub_tasks:
+                        await ctx_mgr.prepare_sub_task(task)
+                    
+                    # Get adapter for bridge
+                    bridge_adapter = router._get_adapter('deepseek-bridge')
+                    bridge_model = 'deepseek-chat'
+                    
+                    # Execute sub-tasks
+                    start_time = time.time()
+                    execution_results = await executor.execute(sub_tasks, bridge_adapter, bridge_model)
+                    execution_duration = time.time() - start_time
+                    
+                    # Record context from each result
+                    for result in execution_results:
+                        await ctx_mgr.record_result(result)
+                    
+                    # Aggregate results
+                    aggregator = HybridResultAggregator(bridge_adapter, bridge_model)
+                    aggregated = await aggregator.aggregate(execution_results, sub_tasks)
+                    
+                    # Format response
+                    result_aggregator = ResultAggregator()
+                    response = result_aggregator.format_response(aggregated)
+                    
+                    # Track performance
+                    app.state.perf_tracker.record_request(
+                        duration=execution_duration,
+                        success=aggregated.success_count > 0,
+                        tokens=aggregated.success_count,
+                        truncated=False
+                    )
+                    
+                    logger.info(
+                        "Session Manager: completed %d/%d sub-tasks in %.2fs",
+                        aggregated.success_count, len(sub_tasks), execution_duration
+                    )
+                    
+                    return response
+                
+        except Exception as exc:
+            logger.warning(
+                "Session Manager failed, falling back to normal flow: %s",
+                exc, exc_info=True
+            )
+            # Fall through to existing flow
+    
     # Handle streaming
     if request.stream:
         async def stream_generator():
@@ -172,7 +277,9 @@ async def chat_completions(request: ChatCompletionRequest):
     
     # Non-streaming: execute with fallback chain
     try:
+        start_time = time.time()
         response = await fb_manager.execute(request_dict)
+        duration = time.time() - start_time
         
         # Log fallback events if any occurred
         if fb_manager.events:
@@ -180,6 +287,24 @@ async def chat_completions(request: ChatCompletionRequest):
                 "Request completed with %d fallback events",
                 len(fb_manager.events),
             )
+        
+        # Track performance for non-session-manager requests
+        tokens = 0
+        truncated = False
+        if isinstance(response, dict) and "usage" in response:
+            usage = response["usage"]
+            tokens = usage.get("total_tokens", 0)
+            # Check if truncated (finish_reason == 'length')
+            choices = response.get("choices", [])
+            if choices and choices[0].get("finish_reason") == "length":
+                truncated = True
+        
+        app.state.perf_tracker.record_request(
+            duration=duration,
+            success=True,
+            tokens=tokens,
+            truncated=truncated
+        )
         
         # Track cost from response usage
         if isinstance(response, dict) and "usage" in response:
@@ -359,6 +484,59 @@ async def accounts_health():
     """Return health status for all registered accounts."""
     mgr: AccountManager = app.state.account_manager
     return {"accounts": mgr.get_account_health()}
+
+
+# ============================================================================
+# Session Manager Endpoints (Phase 4)
+# ============================================================================
+
+
+@app.get("/v1/session-manager/stats")
+async def session_manager_stats():
+    """Return session pool stats, performance metrics, and adaptive recommendations."""
+    try:
+        pool_stats = await app.state.session_pool.get_pool_stats()
+        perf_metrics = app.state.perf_tracker.get_metrics()
+        recent_metrics = app.state.perf_tracker.get_recent_metrics(window=20)
+        recommendations = app.state.adaptive_mgr.get_recommendations()
+
+        return {
+            "pool": pool_stats,
+            "performance": {
+                "truncation_rate": perf_metrics.truncation_rate,
+                "avg_response_time": perf_metrics.avg_response_time,
+                "success_rate": perf_metrics.success_rate,
+                "avg_tokens_per_response": perf_metrics.avg_tokens_per_response,
+                "session_rotation_count": perf_metrics.session_rotation_count,
+                "error_rate": perf_metrics.error_rate,
+            },
+            "recent_performance": {
+                "truncation_rate": recent_metrics.truncation_rate,
+                "avg_response_time": recent_metrics.avg_response_time,
+                "success_rate": recent_metrics.success_rate,
+                "error_rate": recent_metrics.error_rate,
+            },
+            "recommendations": recommendations,
+            "enabled": _SESSION_MGR_ENABLED,
+        }
+    except Exception as exc:
+        logger.error("Failed to get session manager stats: %s", exc)
+        return {"error": str(exc)}
+
+
+@app.get("/v1/session-manager/config")
+async def session_manager_config():
+    """Return current session manager settings."""
+    pool_config = app.state.adaptive_mgr.config
+    return {
+        "enabled": _SESSION_MGR_ENABLED,
+        "token_threshold": _TOKEN_THRESHOLD,
+        "pool_config": {
+            "max_sessions": pool_config.max_sessions,
+            "max_messages_per_session": pool_config.max_messages_per_session,
+            "session_ttl": pool_config.session_ttl,
+        },
+    }
 
 
 if __name__ == "__main__":
