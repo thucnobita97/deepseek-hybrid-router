@@ -53,6 +53,15 @@ class AlibabaAdapter:
     # ------------------------------------------------------------------
 
     def _get_client(self) -> httpx.AsyncClient:
+        """Return the shared async HTTP client, creating it lazily.
+
+        Connection pool settings (via ``httpx.Limits``):
+            - ``max_connections=20``: ceiling on total open connections.
+            - ``max_keepalive_connections=10``: idle connections retained
+              for reuse before being closed.
+            - ``keepalive_expiry=30``: seconds an idle keepalive connection
+              may sit in the pool before being discarded.
+        """
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
@@ -61,6 +70,11 @@ class AlibabaAdapter:
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self._timeout, connect=10.0),
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30,
+                ),
             )
         return self._client
 

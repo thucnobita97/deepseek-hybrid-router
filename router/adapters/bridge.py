@@ -111,6 +111,11 @@ class BridgeAdapter:
         self.base_url = base_url.rstrip("/")
         self.config = config or BridgeConfig()
 
+        # Connection pool configuration:
+        #   max_connections=20: ceiling on total open connections
+        #   max_keepalive_connections=10: idle connections retained for reuse
+        #   keepalive_expiry=30: seconds an idle keepalive connection may sit
+        #                        in the pool before being discarded
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={
@@ -123,6 +128,11 @@ class BridgeAdapter:
                 read=self.config.timeout,
                 write=self.config.timeout,
                 pool=self.config.connect_timeout,
+            ),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
             ),
         )
 
