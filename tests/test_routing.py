@@ -157,22 +157,25 @@ def test_get_fallback_chain_with_list(router):
     chain = router.get_fallback_chain(RequestType.TOOL_CALLING)
     assert isinstance(chain, list)
     assert len(chain) == 2
-    assert "alibaba:qwen-max" in chain
+    assert "alibaba:qwen3.7-max" in chain
     assert "deepseek-bridge:v4-instant" in chain
 
 
-def test_get_fallback_chain_with_single(router):
-    """Should return single fallback when 'fallback' key exists."""
+def test_get_fallback_chain_vision(router):
+    """Should return vision fallbacks list."""
     chain = router.get_fallback_chain(RequestType.VISION)
     assert isinstance(chain, list)
     assert len(chain) == 1
-    assert "deepinfra:GLM-5.3-Flash" in chain
+    assert "deepseek-bridge:v4-instant" in chain
 
 
-def test_get_fallback_chain_no_fallbacks(router):
-    """Should return empty list when no fallbacks configured."""
+def test_get_fallback_chain_search(router):
+    """Should return search fallbacks list."""
     chain = router.get_fallback_chain(RequestType.SEARCH)
-    assert chain == []
+    assert isinstance(chain, list)
+    assert len(chain) == 2
+    assert "alibaba:qwen3.8-flash" in chain
+    assert "deepinfra:V4-Flash-0731" in chain
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +187,7 @@ def test_router_creates_bridge_adapter(router):
     """Should create BridgeAdapter for deepseek-bridge provider."""
     adapter = router._get_adapter("deepseek-bridge")
     assert isinstance(adapter, BridgeAdapter)
-    assert adapter.base_url == "http://localhost:8000"
+    assert adapter.base_url == "http://localhost:8002"
 
 
 def test_router_creates_deepinfra_adapter(router):
@@ -255,7 +258,7 @@ async def test_route_tool_calling_request(router):
 
 @pytest.mark.asyncio
 async def test_route_vision_request(router):
-    """Should route vision request to bridge adapter."""
+    """Should route vision request to deepinfra adapter (GLM-5.3-Flash)."""
     request = ChatCompletionRequest(
         model="deepseek-chat",
         messages=[
@@ -269,8 +272,8 @@ async def test_route_vision_request(router):
         ],
     )
     adapter, model, request_type = await router.route(request.model_dump())
-    assert isinstance(adapter, BridgeAdapter)
-    assert model == "v4-instant"
+    assert isinstance(adapter, DeepInfraAdapter)
+    assert model == "GLM-5.3-Flash"
     assert request_type == RequestType.VISION
 
 
@@ -443,7 +446,7 @@ def test_get_route_info(router):
     info = router.get_route_info(RequestType.TOOL_CALLING)
     assert info["request_type"] == "tool_calling"
     assert info["primary"] == "deepinfra:V4-Flash-0731"
-    assert "alibaba:qwen-max" in info["fallbacks"]
+    assert "alibaba:qwen3.7-max" in info["fallbacks"]
     assert "tool" in info["description"].lower()  # Check it contains "tool"
 
 
