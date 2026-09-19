@@ -1,0 +1,49 @@
+# Routing rules configuration
+# Defines how different request types are routed to providers
+
+routing_rules:
+  tool_calling:
+    primary: deepinfra:V4-Flash-0731
+    fallbacks:
+      - alibaba:qwen3.7-max
+      - deepseek-bridge:v4-instant
+    description: "Requests with function/tool calls"
+    
+  vision:
+    primary: deepinfra:GLM-5.3-Flash
+    fallbacks:
+      - deepseek-bridge:v4-instant
+    description: "Requests with image content"
+    
+  reasoning:
+    primary: deepseek-bridge:expert
+    fallbacks:
+      - alibaba:qwen3.7-max
+      - deepinfra:V4-Flash-0731
+    description: "Complex reasoning, math, logic tasks"
+    
+  search:
+    primary: deepseek-bridge:v4-instant
+    description: "Web search and information retrieval"
+    
+  chat:
+    primary: deepseek-bridge:v4-instant
+    fallbacks:
+      - deepinfra:V4-Flash-0731
+      - alibaba:qwen3.8-flash
+    description: "General conversation and simple queries"
+
+providers:
+  deepseek-bridge:
+    base_url: http://localhost:8002
+    description: "Local DeepSeek-API fork"
+    
+  deepinfra:
+    base_url: https://api.deepinfra.com/v1/openai
+    api_key_env: DEEPINFRA_API_KEY
+    description: "DeepInfra API"
+    
+  alibaba:
+    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    api_key_env: ALIBABA_API_KEY
+    description: "Alibaba Token Plan (DashScope)"

@@ -1,0 +1,3 @@
+# This directory stores SQLite databases and JSON files at runtime.
+# Contents are ignored by git (see .gitignore).
+# Files are auto-created on first use.

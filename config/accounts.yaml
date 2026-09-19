@@ -1,0 +1,26 @@
+# Multi-account configuration for DeepSeek bridge instances
+# Each account represents a separate bridge instance that can handle requests
+
+accounts:
+  - id: account1
+    bridge_url: http://localhost:8000
+    weight: 1
+    session_data:
+      description: "Primary bridge instance"
+      
+  - id: account2
+    bridge_url: http://localhost:8001
+    weight: 1
+    session_data:
+      description: "Secondary bridge instance"
+
+# Global settings for account management
+settings:
+  # How long (seconds) a rate-limited account stays blocked before auto-recovery
+  cooldown_seconds: 60
+  
+  # How often (seconds) the background recovery task checks for accounts to re-enable
+  recovery_interval: 30
+  
+  # Default load-balancing strategy: round_robin, least_used, random, weighted
+  default_strategy: round_robin

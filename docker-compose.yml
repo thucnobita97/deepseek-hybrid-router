@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  router:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - DEEPINFRA_API_KEY=${DEEPINFRA_API_KEY}
+      - ALIBABA_API_KEY=${ALIBABA_API_KEY}
+      - BRIDGE_URL=${BRIDGE_URL:-http://localhost:8000}
+      - ROUTER_PORT=8001
+      - CONFIRMATION_MODE=${CONFIRMATION_MODE:-config}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:

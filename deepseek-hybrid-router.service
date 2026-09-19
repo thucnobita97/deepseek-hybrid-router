@@ -1,0 +1,26 @@
+[Unit]
+Description=DeepSeek Hybrid Router - Smart routing for multiple LLM providers
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=thucnobita
+WorkingDirectory=/home/thucnobita/dev/deepseek-hybrid-router
+Environment=PATH=/home/thucnobita/dev/deepseek-hybrid-router/.venv/bin
+ExecStart=/home/thucnobita/dev/deepseek-hybrid-router/.venv/bin/python -m uvicorn router.main:app --host 0.0.0.0 --port 8001 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deepseek-hybrid-router
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/thucnobita/dev/deepseek-hybrid-router/router/data
+
+[Install]
+WantedBy=multi-user.target

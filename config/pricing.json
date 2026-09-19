@@ -1,0 +1,62 @@
+{
+  "pricing": {
+    "deepinfra:V4-Flash-0731": {
+      "provider": "deepinfra",
+      "model": "V4-Flash-0731",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Free tier"
+    },
+    "deepinfra:GLM-5.3-Flash": {
+      "provider": "deepinfra",
+      "model": "GLM-5.3-Flash",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Free tier"
+    },
+    "alibaba:qwen3.7-max": {
+      "provider": "alibaba",
+      "model": "qwen3.7-max",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Token plan"
+    },
+    "alibaba:qwen3.8-flash": {
+      "provider": "alibaba",
+      "model": "qwen3.8-flash",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Token plan"
+    },
+    "alibaba:qwen-max": {
+      "provider": "alibaba",
+      "model": "qwen-max",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Token plan (alias)"
+    },
+    "deepseek-bridge:v4-instant": {
+      "provider": "deepseek-bridge",
+      "model": "v4-instant",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Free, reverse-engineered"
+    },
+    "deepseek-bridge:expert": {
+      "provider": "deepseek-bridge",
+      "model": "expert",
+      "input_cost_per_1k": 0.00,
+      "output_cost_per_1k": 0.00,
+      "note": "Free, reverse-engineered"
+    }
+  },
+  "budget": {
+    "daily_threshold_usd": 5.00,
+    "warning_percent": 80,
+    "alert_percent": 100
+  },
+  "defaults": {
+    "input_cost_per_1k": 0.00,
+    "output_cost_per_1k": 0.00
+  }
+}

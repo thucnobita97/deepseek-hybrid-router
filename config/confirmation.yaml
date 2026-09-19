@@ -1,0 +1,18 @@
+# Confirmation rules configuration
+# Controls how the router confirms provider selection for each request type.
+#
+# Rule formats:
+#   auto              — use the primary provider from routing.yaml
+#   fallback          — skip the primary, use the fallback chain
+#   prefer:<provider> — override with the specified provider:model
+#
+# Hot-reload: call ConfigConfirmation.reload_config() to re-read this file.
+
+rules:
+  tool_calling: auto
+  vision: auto
+  reasoning: prefer:deepseek-bridge:expert
+  search: auto
+  chat: auto
+  on_bridge_failure: fallback
+  on_all_free_fail: prefer:openrouter
