@@ -168,11 +168,23 @@ class TaskSizeDetector:
 
     @staticmethod
     def _extract_text(request) -> str:
-        """Concatenate all message content from a request into one string."""
+        """Concatenate all message content from a request into one string.
+        
+        Accepts both object-style requests (with .messages attr) and
+        plain dicts (with 'messages' key).
+        """
         parts: list[str] = []
-        messages = getattr(request, "messages", None) or []
+        # Support both object (.messages) and dict (["messages"])
+        if isinstance(request, dict):
+            messages = request.get("messages", []) or []
+        else:
+            messages = getattr(request, "messages", None) or []
         for msg in messages:
-            content = getattr(msg, "content", None)
+            # Support both object (.content) and dict (["content"])
+            if isinstance(msg, dict):
+                content = msg.get("content", None)
+            else:
+                content = getattr(msg, "content", None)
             if isinstance(content, str):
                 parts.append(content)
             elif isinstance(content, list):
