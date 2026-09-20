@@ -96,156 +96,33 @@ Free DeepSeek V4     Free GPT-4
 
 ---
 
-## Phase 2: Copilot Bridge Setup (1.5 hours)
+## Phase 2: Copilot Bridge Setup (SKIPPED 2026-09-20)
 
-**Goal:** Setup Windows-Copilot-API as second bridge on port 8003
+**Reasons for skipping:**
+- Copilot geo-blocked in Vietnam ("Not available in your region")
+- Exporting browser profile from Windows Edge to WSL is complex (cf_clearance cookie required)
+- Cloudflare clearance expires ~30 minutes → frequent re-login
+- Low rate limit (12 RPM vs DeepSeek's 120 RPM)
 
-### Task 2.1: Fork & clone Windows-Copilot-API
-- **Commands:**
-  ```bash
-  gh repo fork sums001/Windows-Copilot-API --clone=false
-  cd ~/dev && git clone git@github.com:thucnobita97/Windows-Copilot-API.git copilot-api-fork
-  ```
-- **Verify:** `ls ~/dev/copilot-api-fork`
+**Decision:** Focus on existing bridges:
+- DeepSeek free bridge (120 RPM, already running on port 8002)
+- Paid APIs: DeepInfra + Alibaba Token Plan (stable, no geo-restrictions)
 
-### Task 2.2: Setup Python environment
-- **Commands:**
-  ```bash
-  cd ~/dev/copilot-api-fork
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip install -e .
-  ```
-- **Verify:** `python -c "import copilot; print('OK')"`
-
-### Task 2.3: Configure port 8003
-- **File:** `~/dev/copilot-api-fork/.env`
-- **Change:** `PORT=8003` (default is 8000)
-- **Verify:** `grep PORT .env`
-
-### Task 2.4: Sign-in Microsoft account (MANUAL)
-- **Command:** `python -m copilot login`
-- **Action:** User signs in via browser with Microsoft/Google account
-- **Verify:** `ls session/` shows `token.json` and `session.json`
-- **Note:** May require 2FA (manual step)
-
-### Task 2.5: Test Copilot bridge
-- **Command:** `python app.py` (runs on port 8003)
-- **Test:**
-  ```bash
-  curl -X POST http://localhost:8003/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -d '{"model":"copilot","messages":[{"role":"user","content":"Hello"}]}'
-  ```
-- **Verify:** Response has content, no errors
-
-### Task 2.6: Create systemd service
-- **File:** `~/.config/systemd/user/copilot-bridge.service`
-- **Content:**
-  ```ini
-  [Unit]
-  Description=Copilot API Bridge (port 8003)
-  After=network.target
-
-  [Service]
-  Type=simple
-  WorkingDirectory=/home/thucnobita/dev/copilot-api-fork
-  ExecStart=/home/thucnobita/dev/copilot-api-fork/.venv/bin/python app.py
-  Restart=always
-  RestartSec=5
-
-  [Install]
-  WantedBy=default.target
-  ```
-- **Command:** `systemctl --user enable --now copilot-bridge`
-- **Verify:** `systemctl --user status copilot-bridge` shows active
-
-### Task 2.7: Git commit & push copilot-api-fork
-- **Command:** `git add .env && git commit -m "feat: configure port 8003" && git push`
-- **Verify:** GitHub repo updated
-
-**Deliverables:** Copilot bridge running on port 8003, systemd service, session stored
-
-**Risks:**
-- Microsoft account sign-in may require 2FA (manual step)
-- Cloudflare clearance expires after ~30 minutes (need re-login)
-- Copilot rate limit 12 RPM (lower than DeepSeek)
+**Impact:** Still achieves smart routing goals with 2-tier fallback (free → paid)
 
 ---
 
-## Phase 3: Integrate Copilot into Router (1 hour)
+## Phase 3: Integrate Copilot into Router (SKIPPED 2026-09-20)
 
-**Goal:** Add Copilot as provider in router, build integration layer
-
-### Task 3.1: Create Copilot adapter
-- **File:** `~/dev/model-hybrid-nobita/router/adapters/copilot.py` (new)
-- **Model:** `deepinfra:deepseek-ai/DeepSeek-V4-Flash-0731` (code generation)
-- **Logic:**
-  ```python
-  class CopilotAdapter:
-      def __init__(self, base_url="http://localhost:8003"):
-          self.base_url = base_url
-      
-      async def send(self, request: dict) -> dict:
-          async with httpx.AsyncClient() as client:
-              resp = await client.post(f"{self.base_url}/v1/chat/completions", json=request)
-              return resp.json()
-  ```
-- **Verify:** Import works, can instantiate
-- **Subagent:** Yes
-
-### Task 3.2: Update routing config
-- **File:** `~/dev/model-hybrid-nobita/config/routing.yaml`
-- **Changes:** Add `copilot-bridge` provider, update fallback chains
-- **New config:**
-  ```yaml
-  providers:
-    copilot-bridge:
-      base_url: http://localhost:8003
-      description: "Windows Copilot API Bridge"
-  
-  routing_rules:
-    chat:
-      primary: deepseek-bridge:v4-instant
-      fallbacks:
-        - copilot-bridge:copilot
-        - deepinfra:deepseek-ai/DeepSeek-V4-Flash-0731
-        - alibaba:qwen3.8-flash
-  ```
-- **Model:** `deepinfra:deepseek-ai/DeepSeek-V4-Flash-0731`
-- **Subagent:** Yes
-
-### Task 3.3: Add health check endpoint
-- **File:** `~/dev/model-hybrid-nobita/router/main.py`
-- **Logic:** Add `/v1/copilot/health` endpoint, check `http://localhost:8003/health`
-- **Model:** `deepinfra:deepseek-ai/DeepSeek-V4-Flash-0731`
-- **Verify:** `curl http://localhost:8001/v1/copilot/health` returns status
-- **Subagent:** Yes
-
-### Task 3.4: Update /v1/models endpoint
-- **File:** `~/dev/model-hybrid-nobita/router/main.py`
-- **Logic:** Add Copilot models to the list
-- **Model:** `deepinfra:deepseek-ai/DeepSeek-V4-Flash-0731`
-- **Verify:** `curl http://localhost:8001/v1/models` includes Copilot entries
-- **Subagent:** Yes
-
-### Task 3.5: Test integration
-- **Test:** `hermes chat -m model-hybrid-nobita:copilot -q "Hello"`
-- **Verify:** Response from Copilot, no errors
-- **Subagent:** No (manual)
-
-### Task 3.6: Git commit & push
-- **Command:** `git add router/adapters/copilot.py config/routing.yaml router/main.py && git commit -m "feat: integrate Copilot bridge" && git push`
-
-**Deliverables:** Copilot bridge integrated into router, usable as provider, health check available
-
-**Parallelization:** Tasks 3.1 + 3.2 + 3.3 + 3.4 can run in parallel (independent code paths)
+Skipped due to Phase 2 failure. Router will benchmark and route between:
+- Primary: DeepSeek free bridge
+- Fallback: DeepInfra + Alibaba paid APIs
 
 ---
 
-## Phase 4: Benchmark & Auto-Routing (3 hours)
+## Phase 4: Benchmark & Auto-Routing (2 hours, modified)
 
-**Goal:** Test DeepSeek vs Copilot, build smart routing based on performance
+**Goal:** Benchmark DeepSeek free bridge vs Paid APIs, build smart routing based on cost/latency/quality
 
 ### Task 4.1: Design benchmark test suite
 - **File:** `~/dev/model-hybrid-nobita/tests/benchmark.py` (new)
@@ -337,19 +214,17 @@ Free DeepSeek V4     Free GPT-4
 
 ---
 
-## Phase Dependencies
+## Phase Dependencies (Updated)
 
 ```
-Phase 1 (Rename)
+Phase 1 (Rename) -- DONE
     |
     v
-Phase 2 (Copilot Setup) -- needs folder renamed
+Phase 2 (Copilot Setup) -- SKIPPED (geo-blocked)
+Phase 3 (Integration) -- SKIPPED
     |
     v
-Phase 3 (Integration) -- needs Copilot bridge running
-    |
-    v
-Phase 4 (Benchmark) -- needs integration complete
+Phase 4 (Benchmark) -- DeepSeek free vs Paid APIs
     |
     v
 Phase 5 (Docker verify) -- needs everything stable
@@ -368,16 +243,16 @@ Phase 5 (Docker verify) -- needs everything stable
 | 4.4 Smart routing | No (sequential) | deepinfra:V4-Flash-0731 |
 | 4.5 Integrate | No (after 4.4) | alibaba:qwen3.7-max |
 
-## Total Effort
+## Total Effort (Updated)
 
 | Phase | Duration | Notes |
 |-------|----------|-------|
-| Phase 1: Rename | 30 min | Sequential, ~2min downtime |
-| Phase 2: Copilot setup | 1.5 hours | Manual sign-in required |
-| Phase 3: Integration | 1 hour | Tasks 3.1-3.4 parallel |
-| Phase 4: Benchmark | 3 hours | Manual benchmark run |
+| Phase 1: Rename | 30 min | DONE |
+| Phase 2: Copilot setup | SKIPPED | Geo-blocked in VN |
+| Phase 3: Integration | SKIPPED | No Copilot |
+| Phase 4: Benchmark | 2 hours | DeepSeek free vs Paid APIs |
 | Phase 5: Docker verify | 30 min | Most Docker already done |
-| **Total** | **~6-7 hours** | |
+| **Total** | **~2.5 hours** | |
 
 ## Success Criteria
 
