@@ -139,7 +139,7 @@ async def list_models():
                 key = f"{provider}/{model}"
                 if key not in seen:
                     seen[key] = {
-                        "id": f"deepseek-hybrid-nobita:{key}",
+                        "id": f"model-hybrid-nobita:{key}",
                         "object": "model",
                         "created": int(time.time()),
                         "owned_by": provider,
@@ -149,7 +149,7 @@ async def list_models():
 
     # Always expose a generic "auto" entry that routes by request type
     seen["auto"] = {
-        "id": "deepseek-hybrid-nobita:auto",
+        "id": "model-hybrid-nobita:auto",
         "object": "model",
         "created": int(time.time()),
         "owned_by": "hybrid-router",
