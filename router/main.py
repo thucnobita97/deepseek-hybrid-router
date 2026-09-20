@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -119,6 +120,84 @@ app.include_router(sessions_router)
 @app.get("/healthz")
 async def health_check():
     return {"status": "healthy", "timestamp": int(time.time())}
+
+
+@app.get("/v1/models")
+async def list_models():
+    """OpenAI-compatible /v1/models endpoint for client discovery."""
+    router: Router = app.state.router
+    from router.analyzer import RequestType
+
+    seen = {}
+    for rt in RequestType:
+        try:
+            info = router.get_route_info(rt)
+            for spec_str in [info.get("primary", "")] + (info.get("fallbacks") or []):
+                if not spec_str:
+                    continue
+                provider, model = _parse_provider_model(spec_str)
+                key = f"{provider}/{model}"
+                if key not in seen:
+                    seen[key] = {
+                        "id": f"deepseek-hybrid-nobita:{key}",
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": provider,
+                    }
+        except Exception:
+            continue
+
+    # Always expose a generic "auto" entry that routes by request type
+    seen["auto"] = {
+        "id": "deepseek-hybrid-nobita:auto",
+        "object": "model",
+        "created": int(time.time()),
+        "owned_by": "hybrid-router",
+    }
+
+    return {"object": "list", "data": list(seen.values())}
+
+
+@app.get("/v1/bridge/health")
+async def bridge_health():
+    """Check if the free DeepSeek bridge is up and usable."""
+    import httpx
+    router: Router = app.state.router
+    bridge_url = os.getenv("BRIDGE_URL", "http://localhost:8002").rstrip("/")
+    
+    status = {"bridge_url": bridge_url, "available": False, "last_check": int(time.time())}
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Try common health endpoints
+            for path in ["/healthz", "/health", "/"]:
+                try:
+                    resp = await client.get(f"{bridge_url}{path}")
+                    if resp.status_code < 500:
+                        status["available"] = True
+                        status["status_code"] = resp.status_code
+                        status["endpoint"] = path
+                        break
+                except Exception:
+                    continue
+    except Exception as exc:
+        status["error"] = str(exc)
+    
+    # Also include routing info to show current state
+    try:
+        info = {}
+        from router.analyzer import RequestType
+        for rt in RequestType:
+            route_info = router.get_route_info(rt)
+            info[rt.value] = {
+                "primary": route_info.get("primary"),
+                "bridge_is_primary": "deepseek-bridge" in (route_info.get("primary", "") or ""),
+            }
+        status["routing"] = info
+    except Exception:
+        pass
+    
+    return status
 
 
 def _extract_text(content) -> str:
@@ -269,26 +348,50 @@ async def chat_completions(request: ChatCompletionRequest):
     
     # Handle streaming
     if request.stream:
+        import json as _json
+
+        def _sse(obj: dict) -> str:
+            """Emit one SSE line as proper JSON (double-quoted, null-safe)."""
+            return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
+
         async def stream_generator():
             try:
                 # Execute with fallback chain
                 response = await fb_manager.execute(request_dict)
-                
-                # If response is an async generator (streaming), yield chunks
+
+                # Case 1: async generator — yield each chunk as SSE JSON
                 if hasattr(response, "__aiter__"):
                     async for chunk in response:
                         if isinstance(chunk, str):
-                            yield chunk
+                            # Already SSE-formatted
+                            yield chunk if chunk.startswith("data:") else f"data: {chunk}\n\n"
                         elif isinstance(chunk, dict):
-                            yield f"data: {chunk}\n\n"
-                else:
-                    # Non-streaming response, wrap in SSE format
-                    yield f"data: {response}\n\n"
+                            yield _sse(chunk)
                     yield "data: [DONE]\n\n"
+                    return
+
+                # Case 2: dict with collected 'chunks' list (adapter buffer mode)
+                if isinstance(response, dict) and "chunks" in response:
+                    for chunk in response["chunks"]:
+                        yield _sse(chunk)
+                    yield "data: [DONE]\n\n"
+                    return
+
+                # Case 3: single non-streaming response dict — wrap as one SSE event
+                if isinstance(response, dict):
+                    yield _sse(response)
+                    yield "data: [DONE]\n\n"
+                    return
+
+                # Fallback: unknown type, stringify
+                yield f"data: {_json.dumps({'error': 'unexpected response type'})}\n\n"
+                yield "data: [DONE]\n\n"
+
             except Exception as exc:
-                logger.error("Streaming failed: %s", exc)
-                yield f"data: {{\"error\": \"{str(exc)}\"}}\n\n"
-        
+                logger.error("Streaming failed: %s", exc, exc_info=True)
+                yield _json.dumps({"error": str(exc)}) + "\n\n"
+                yield "data: [DONE]\n\n"
+
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
     
     # Non-streaming: execute with fallback chain

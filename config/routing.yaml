@@ -3,23 +3,23 @@
 
 routing_rules:
   tool_calling:
-    primary: deepinfra:V4-Flash-0731
+    primary: deepseek-bridge:v4-instant
     fallbacks:
+      - deepinfra:V4-Flash-0731
       - alibaba:qwen3.7-max
-      - deepseek-bridge:v4-instant
     description: "Requests with function/tool calls"
     
   vision:
-    primary: deepinfra:GLM-5.3-Flash
+    primary: deepseek-bridge:v4-instant
     fallbacks:
-      - deepseek-bridge:v4-instant
+      - deepinfra:GLM-5.3-Flash
     description: "Requests with image content"
     
   reasoning:
     primary: deepseek-bridge:expert
     fallbacks:
-      - alibaba:qwen3.7-max
       - deepinfra:V4-Flash-0731
+      - alibaba:qwen3.7-max
     description: "Complex reasoning, math, logic tasks"
     
   search:
